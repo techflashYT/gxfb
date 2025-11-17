@@ -35,7 +35,16 @@ typedef u32 pixel_t;
 #endif
 
 static void rgbFbToEFB(void) {
-	memcpy(efb, rgbFb, FB_WIDTH * FB_HEIGHT * sizeof(pixel_t));
+	int y;
+	void *src, *dst;
+
+	src = rgbFb;
+	dst = efb;
+	for (y = 0; y < FB_HEIGHT; y++) {
+		memcpy(dst, src, FB_WIDTH * sizeof(pixel_t));
+		src += FB_WIDTH * sizeof(pixel_t);
+		dst += 1024 * sizeof(pixel_t);
+	}
 }
 
 static void drawPix(int x, int y, pixel_t pix) {
