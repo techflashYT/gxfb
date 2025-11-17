@@ -120,6 +120,9 @@ static void drawFb(void) {
 
 }
 
+// benchmark FPS or not
+#define BENCH_MODE
+
 #ifdef MODE_RGB565
 typedef u16 pixel_t;
 #define PIX_COLOR_WHITE 0xffff
@@ -129,6 +132,10 @@ typedef u32 pixel_t;
 #define PIX_COLOR_WHITE 0xffffffff
 #define PIX_COLOR_BLUE  0x0000ffff
 #endif
+
+//
+// framebuffer functions
+//
 
 static void drawPix(int x, int y, pixel_t pix) {
 	((pixel_t *)rgbFb)[(y * FB_WIDTH) + x] = pix;
@@ -159,6 +166,41 @@ static void drawSquare(int thickness, int width, int x, int y, pixel_t pix) {
 	}
 }
 
+
+//
+// timing functions (for benchmark)
+//
+
+#ifdef BENCH_MODE
+	#ifdef HW_RVL
+	#define ticksPerUsec (243 / 4)
+	#elif defined(HW_DOL)
+	#define ticksPerUsec (162 / 4)
+	#else
+	#error "What in the world are you building for"
+	#endif
+
+	static inline u64 mftb(void) {
+		u32 hi, hi2, lo;
+		hi = hi2 = lo = 0;
+
+		do {
+			asm volatile("mftbu %0" : "=r"(hi));
+			asm volatile("mftb  %0" : "=r"(lo));
+			asm volatile("mftbu %0" : "=r"(hi2));
+		/* avoid rollover */
+		} while (hi != hi2);
+
+		return (u64)(((u64)hi << 32) | lo);
+	}
+
+	bool hasElapsed(u64 startTB, u32 usecSince) {
+		u64 tb, ticks;
+		tb = mftb();
+		ticks = (u64)ticksPerUsec * usecSince;
+		return (tb >= (startTB + ticks));
+	}
+#endif
 int main(int argc, char *argv[]) {
 	f32 yscale;
 	u32 xfbHeight;
@@ -167,6 +209,9 @@ int main(int argc, char *argv[]) {
 	void *gx_fifo = NULL;
 	GXColor background = {0, 0, 0, 0xff};
 	int x = 400, y = 200, dx = 4, dy = 4;
+#ifdef BENCH_MODE
+	u64 frames = 0, lastTb = 0;
+#endif
 
 	// basic VI setup
 	VIDEO_Init();
@@ -178,6 +223,9 @@ int main(int argc, char *argv[]) {
 	VIDEO_Flush();
 	VIDEO_WaitVSync();
 	if(rmode->viTVMode&VI_NON_INTERLACE) VIDEO_WaitVSync();
+#ifdef BENCH_MODE
+	SYS_STDIO_Report(true);
+#endif
 
 	// setup the FIFO and then init the GX API
 	gx_fifo = memalign(32, DEFAULT_FIFO_SIZE);
@@ -287,7 +335,21 @@ int main(int argc, char *argv[]) {
 
 		VIDEO_SetNextFramebuffer(xfb);
 		VIDEO_Flush();
+
+#ifdef BENCH_MODE
+		frames++;
+		if (hasElapsed(lastTb, 1000 * 1000)) {
+			char str[64];
+			lastTb = mftb();
+			sprintf(str, "Frames in past second: %llu\r\n", frames);
+			printf("%s", str);
+			//usb_sendbuffer(0, str, strlen(str));
+			usb_sendbuffer(1, str, strlen(str));
+			frames = 0;
+		}
+#else
 		VIDEO_WaitVSync();
+#endif
 	}
 	return 0;
 }
